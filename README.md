@@ -20,5 +20,8 @@ The production build is emitted as a self-contained `dist/index.html` file. The 
 - Vite development server
 - Responsive portrait/landscape canvas
 - Single-file production bundling
+- Runtime copies of all 19 supplied symbols
+- Randomized 5×3 reel prototype
+- Tap-to-shuffle interaction
 
-Gameplay, assets, audio, MRAID behavior, and creative sequencing are intentionally not included in this initial foundation.
+Spin animation, win logic, audio, MRAID behavior, and creative sequencing are intentionally not included yet.

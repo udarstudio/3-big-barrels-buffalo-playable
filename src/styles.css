@@ -29,9 +29,13 @@ body {
 #app {
   position: fixed;
   inset: 0;
-  background:
-    radial-gradient(circle at 50% 35%, rgb(117 48 16 / 45%), transparent 45%),
-    linear-gradient(180deg, #2c1309 0%, #120b08 70%);
+  background: url('../assets/runtime/backgrounds/Base_Game_Background_1080x1920.png') center / cover no-repeat;
+}
+
+@media (orientation: landscape) {
+  #app {
+    background-image: url('../assets/runtime/backgrounds/Base_Game_Background_1920x1080.png');
+  }
 }
 
 canvas {
