@@ -29,12 +29,12 @@ body {
 #app {
   position: fixed;
   inset: 0;
-  background: url('../assets/runtime/backgrounds/Base_Game_Background_1080x1920.png') center / cover no-repeat;
+  background: url('../assets/runtime/backgrounds/Base_Game_Background_1080x1920.jpg') center / cover no-repeat;
 }
 
 @media (orientation: landscape) {
   #app {
-    background-image: url('../assets/runtime/backgrounds/Base_Game_Background_1920x1080.png');
+    background-image: url('../assets/runtime/backgrounds/Base_Game_Background_1920x1080.jpg');
   }
 }
 
