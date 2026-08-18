@@ -1,4 +1,5 @@
 import {
+  BlurFilter,
   Container,
   FillGradient,
   Graphics,
@@ -39,6 +40,10 @@ const GUIDE_HAND_ROTATION = Math.PI * 0.8;
 const GUIDE_HAND_TAP_DISTANCE = 14;
 const GUIDE_HAND_TAP_CYCLE_MS = 900;
 const GUIDE_HAND_REAPPEAR_DELAY_MS = 3000;
+const WIN_ANIMATION_FRAME_MS = 70;
+const WIN_ANIMATION_PAUSE_MS = 400;
+const BUFFALO_SYMBOL_ID = '09_Buffalo';
+const WOLF_SYMBOL_ID = '12_Wolf';
 const REEL_BUFFER_ROWS = 2;
 const REEL_SPRITE_COUNT = REEL_ROWS + REEL_BUFFER_ROWS;
 const SPIN_ACCELERATION_MS = 300;
@@ -55,6 +60,20 @@ const FRAME_PIN_INSET = 6;
 const FRAME_PIN_SPACING = 18;
 const FRAME_PIN_RADIUS = 3;
 const FRAME_PIN_HIGHLIGHT_RADIUS = 1.35;
+const SMALL_WIN_LAYOUT = [
+  ['15_A', '12_Wolf', '18_J'],
+  ['11_Cougar', '12_Wolf', '10_Bear'],
+  ['14_Snake', '12_Wolf', '17_Q'],
+  ['16_K', '10_Bear', '13_Eagle'],
+  ['13_Eagle', '11_Cougar', '19_10'],
+] as const;
+const BIG_WIN_LAYOUT = [
+  ['09_Buffalo', '09_Buffalo', '09_Buffalo'],
+  ['01_WILD', '01_WILD', '01_WILD'],
+  ['01_WILD', '01_WILD', '01_WILD'],
+  ['09_Buffalo', '09_Buffalo', '09_Buffalo'],
+  ['09_Buffalo', '09_Buffalo', '09_Buffalo'],
+] as const;
 
 interface ReelColumn {
   view: Container;
@@ -62,14 +81,33 @@ interface ReelColumn {
   offset: number;
 }
 
+interface AnimatedCell {
+  reelIndex: number;
+  rowIndex: number;
+}
+
+interface WinDecoration {
+  above: Container;
+  behind: Container;
+  update: (elapsedMs: number) => void;
+  destroy: () => void;
+}
+
 export function createReelScene(
   symbols: readonly PlayableSymbol[],
   logoTexture: Texture,
   glovePointerTexture: Texture,
+  wolfHowlSheetTexture: Texture,
+  buffaloVictorySheetTexture: Texture,
   ticker: Ticker,
 ): Container {
   const scene = new Container();
-  const reel = createReelGrid(symbols, ticker);
+  const reel = createReelGrid(
+    symbols,
+    wolfHowlSheetTexture,
+    buffaloVictorySheetTexture,
+    ticker,
+  );
   reel.view.position.set(0, 30);
 
   const logo = new Sprite(logoTexture);
@@ -172,6 +210,8 @@ function createSpinGuide(
 
 function createReelGrid(
   symbols: readonly PlayableSymbol[],
+  wolfHowlSheetTexture: Texture,
+  buffaloVictorySheetTexture: Texture,
   ticker: Ticker,
 ): {
   view: Container;
@@ -183,8 +223,18 @@ function createReelGrid(
 
   const grid = new Container();
   const reels: ReelColumn[] = [];
+  const buffaloSymbol = getSymbolById(symbols, BUFFALO_SYMBOL_ID);
+  const wolfSymbol = getSymbolById(symbols, WOLF_SYMBOL_ID);
+  const buffaloVictoryFrames = createAnimationFrames(buffaloVictorySheetTexture);
+  const wolfHowlFrames = createAnimationFrames(wolfHowlSheetTexture);
+  const outcomeLayouts = [
+    resolveSymbolLayout(SMALL_WIN_LAYOUT, symbols),
+    resolveSymbolLayout(BIG_WIN_LAYOUT, symbols),
+  ];
   const initialSymbols = shuffle(symbols);
   let initialSymbolIndex = 0;
+  let spinIndex = 0;
+  let stopWinAnimation: (() => void) | undefined;
 
   const reelBackground = new Graphics()
     .rect(-GRID_WIDTH * 0.5, -GRID_HEIGHT * 0.5, GRID_WIDTH, GRID_HEIGHT)
@@ -253,18 +303,56 @@ function createReelGrid(
     )
     .fill({ color: 0xffffff });
   cells.mask = cellsMask;
+  const winOverlay = new Container();
 
   const spin = async (): Promise<void> => {
+    stopWinAnimation?.();
+    stopWinAnimation = undefined;
+
+    const outcomeIndex = Math.min(spinIndex, outcomeLayouts.length - 1);
+    const targetLayout = outcomeLayouts[outcomeIndex];
+
     await Promise.all(
       reels.map((reel, index) =>
-        spinReel(reel, index, symbols, ticker),
+        spinReel(reel, index, symbols, targetLayout[index], ticker),
       ),
     );
+
+    if (outcomeIndex === 0) {
+      stopWinAnimation = startSymbolWinAnimation(
+        reels,
+        wolfSymbol,
+        wolfHowlFrames,
+        findSymbolCells(targetLayout, WOLF_SYMBOL_ID),
+        winOverlay,
+        ticker,
+        createWolfWinDecoration,
+      );
+    } else {
+      stopWinAnimation = startSymbolWinAnimation(
+        reels,
+        buffaloSymbol,
+        buffaloVictoryFrames,
+        findSymbolCells(targetLayout, BUFFALO_SYMBOL_ID),
+        winOverlay,
+        ticker,
+        createBuffaloWinDecoration,
+      );
+    }
+
+    spinIndex += 1;
   };
 
   const reelFrame = createReelFrame();
 
-  grid.addChild(reelBackground, cells, cellsMask, separators, reelFrame);
+  grid.addChild(
+    reelBackground,
+    cells,
+    cellsMask,
+    separators,
+    reelFrame,
+    winOverlay,
+  );
   return { view: grid, spin };
 }
 
@@ -437,13 +525,198 @@ function createSpinButton(onSpin: () => Promise<void>): Container {
 }
 
 function setSymbol(sprite: Sprite, symbol: PlayableSymbol): void {
-  sprite.texture = symbol.texture;
+  setSpriteTexture(sprite, symbol.texture, symbol.scale);
+}
+
+function setSpriteTexture(
+  sprite: Sprite,
+  texture: Texture,
+  scaleMultiplier = 1,
+): void {
+  sprite.texture = texture;
 
   const fitScale = Math.min(
-    SYMBOL_SIZE / symbol.texture.width,
-    SYMBOL_SIZE / symbol.texture.height,
+    SYMBOL_SIZE / texture.width,
+    SYMBOL_SIZE / texture.height,
   );
-  sprite.scale.set(fitScale * symbol.scale);
+  sprite.scale.set(fitScale * scaleMultiplier);
+}
+
+function createAnimationFrames(sheet: Texture): Texture[] {
+  const columns = 3;
+  const rows = 3;
+  const sourceFrameWidth = sheet.width / columns;
+  const sourceFrameHeight = sheet.height / rows;
+
+  return Array.from({ length: columns * rows }, (_, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+
+    return new Texture({
+      source: sheet.source,
+      frame: new Rectangle(
+        column * sourceFrameWidth,
+        row * sourceFrameHeight,
+        sourceFrameWidth,
+        sourceFrameHeight,
+      ),
+    });
+  });
+}
+
+function createWolfWinDecoration(): WinDecoration {
+  return createWinDecoration({
+    glowColor: 0x62ff45,
+    borderColors: [0xfff3a1, 0xbfff68, 0x38d83f],
+  });
+}
+
+function createBuffaloWinDecoration(): WinDecoration {
+  return createWinDecoration({
+    glowColor: 0xff8a1f,
+    borderColors: [0xffffbd, 0xffbd3c, 0xf05a19],
+  });
+}
+
+function createWinDecoration({
+  glowColor,
+  borderColors,
+}: {
+  glowColor: number;
+  borderColors: readonly [number, number, number];
+}): WinDecoration {
+  const behind = new Container();
+  const above = new Container();
+  const halfSize = SYMBOL_SIZE * 0.5;
+  const glow = new Graphics()
+    .roundRect(-halfSize, -halfSize, SYMBOL_SIZE, SYMBOL_SIZE, 8)
+    .fill({ color: glowColor });
+  const glowFilter = new BlurFilter({
+    strength: 20,
+    quality: 6,
+    kernelSize: 11,
+  });
+  glowFilter.padding = 48;
+  glow.filters = [glowFilter];
+  glow.blendMode = 'add';
+
+  const borderGradient = new FillGradient({
+    type: 'linear',
+    start: { x: 0, y: 0 },
+    end: { x: 0, y: 1 },
+    colorStops: [
+      { offset: 0, color: borderColors[0] },
+      { offset: 0.45, color: borderColors[1] },
+      { offset: 1, color: borderColors[2] },
+    ],
+    textureSpace: 'local',
+  });
+  const border = new Graphics()
+    .rect(-halfSize - 2, -halfSize - 2, SYMBOL_SIZE + 4, SYMBOL_SIZE + 4)
+    .stroke({ fill: borderGradient, width: 5, alignment: 1 });
+
+  behind.addChild(glow);
+  above.addChild(border);
+
+  return {
+    above,
+    behind,
+    update: (elapsedMs: number): void => {
+      const pulse = (Math.sin((elapsedMs / 900) * Math.PI * 2) + 1) * 0.5;
+      glow.alpha = 0.25 + pulse * 0.75;
+    },
+    destroy: (): void => {
+      glowFilter.destroy();
+      borderGradient.destroy();
+    },
+  };
+}
+
+function startSymbolWinAnimation(
+  reels: readonly ReelColumn[],
+  symbol: PlayableSymbol,
+  frames: readonly Texture[],
+  animatedCells: readonly AnimatedCell[],
+  winOverlay: Container,
+  ticker: Ticker,
+  createDecoration?: () => WinDecoration,
+): () => void {
+  const winningSprites = animatedCells.map(
+    ({ reelIndex, rowIndex }) => reels[reelIndex].sprites[rowIndex + 1],
+  );
+  const animatedOverlays = winningSprites.map((sprite, index) => {
+    const { reelIndex, rowIndex } = animatedCells[index];
+    const overlay = new Container();
+    const overlaySprite = new Sprite(frames[0]);
+    overlaySprite.anchor.set(0.5);
+    overlay.position.set(
+      REEL_CONTENT_LEFT + (reelIndex + 0.5) * CELL_WIDTH,
+      REEL_CONTENT_TOP + (rowIndex + 0.5) * CELL_HEIGHT,
+    );
+    overlay.addChild(overlaySprite);
+
+    const decoration = createDecoration?.();
+
+    if (decoration) {
+      overlay.addChildAt(decoration.behind, 0);
+      overlay.addChild(decoration.above);
+    }
+
+    sprite.visible = false;
+    winOverlay.addChild(overlay);
+    return { decoration, overlay, sprite: overlaySprite };
+  });
+  const pingPongFrameCount = frames.length * 2;
+  const animationDuration = pingPongFrameCount * WIN_ANIMATION_FRAME_MS;
+  const cycleDuration = animationDuration + WIN_ANIMATION_PAUSE_MS;
+  let elapsed = 0;
+  let effectElapsed = 0;
+  let displayedFrame = -1;
+
+  const showFrame = (frameIndex: number): void => {
+    if (frameIndex === displayedFrame) {
+      return;
+    }
+
+    displayedFrame = frameIndex;
+    animatedOverlays.forEach(({ sprite }) => {
+      setSpriteTexture(sprite, frames[frameIndex]);
+    });
+  };
+
+  const animateHowl = (activeTicker: Ticker): void => {
+    elapsed = (elapsed + activeTicker.deltaMS) % cycleDuration;
+    effectElapsed += activeTicker.deltaMS;
+    animatedOverlays.forEach(({ decoration }) => {
+      decoration?.update(effectElapsed);
+    });
+
+    const animationIndex = elapsed < animationDuration
+      ? Math.floor(elapsed / WIN_ANIMATION_FRAME_MS)
+      : 0;
+    const frameIndex = animationIndex < frames.length
+      ? animationIndex
+      : pingPongFrameCount - animationIndex - 1;
+
+    showFrame(frameIndex);
+  };
+
+  showFrame(0);
+  animatedOverlays.forEach(({ decoration }) => decoration?.update(0));
+  ticker.add(animateHowl);
+
+  return () => {
+    ticker.remove(animateHowl);
+    animatedOverlays.forEach(({ decoration, overlay }) => {
+      winOverlay.removeChild(overlay);
+      overlay.destroy({ children: true });
+      decoration?.destroy();
+    });
+    winningSprites.forEach((sprite) => {
+      setSymbol(sprite, symbol);
+      sprite.visible = true;
+    });
+  };
 }
 
 function layoutReelSymbols(reel: ReelColumn): void {
@@ -475,7 +748,7 @@ function setBufferSymbolsAlpha(reel: ReelColumn, alpha: number): void {
 function advanceReel(
   reel: ReelColumn,
   distance: number,
-  symbols: readonly PlayableSymbol[],
+  getNextSymbol: () => PlayableSymbol,
 ): void {
   reel.offset += distance;
 
@@ -488,7 +761,7 @@ function advanceReel(
       throw new Error('The reel strip has no symbol to recycle.');
     }
 
-    setSymbol(recycledSprite, randomItem(symbols));
+    setSymbol(recycledSprite, getNextSymbol());
     reel.sprites.unshift(recycledSprite);
   }
 
@@ -503,6 +776,7 @@ async function spinReel(
   reel: ReelColumn,
   reelIndex: number,
   symbols: readonly PlayableSymbol[],
+  targetSymbols: readonly PlayableSymbol[],
   ticker: Ticker,
 ): Promise<void> {
   setBufferSymbolsVisible(reel, true);
@@ -512,10 +786,20 @@ async function spinReel(
   const steps = FIRST_REEL_STEPS + reelIndex * EXTRA_STEPS_PER_REEL;
   const totalDistance = steps * CELL_HEIGHT;
   let previousDistance = 0;
+  let completedSteps = 0;
+
+  const getNextSymbol = (): PlayableSymbol => {
+    completedSteps += 1;
+
+    const remainingSteps = steps - completedSteps;
+    const targetRow = remainingSteps - 1;
+
+    return targetSymbols[targetRow] ?? randomItem(symbols);
+  };
 
   await animateWithTicker(ticker, duration, (elapsed) => {
     const currentDistance = getSpinDistance(elapsed, duration, totalDistance);
-    advanceReel(reel, currentDistance - previousDistance, symbols);
+    advanceReel(reel, currentDistance - previousDistance, getNextSymbol);
     setBufferSymbolsAlpha(
       reel,
       smoothStep(Math.min(elapsed / BUFFER_FADE_IN_MS, 1)),
@@ -523,7 +807,7 @@ async function spinReel(
     previousDistance = currentDistance;
   });
 
-  advanceReel(reel, totalDistance - previousDistance, symbols);
+  advanceReel(reel, totalDistance - previousDistance, getNextSymbol);
   reel.offset = 0;
   layoutReelSymbols(reel);
 
@@ -612,6 +896,63 @@ function animateWithTicker(
 
 function randomItem<T>(values: readonly T[]): T {
   return values[Math.floor(Math.random() * values.length)];
+}
+
+function getSymbolById(
+  symbols: readonly PlayableSymbol[],
+  symbolId: string,
+): PlayableSymbol {
+  const symbol = symbols.find(({ id }) => id === symbolId);
+
+  if (!symbol) {
+    throw new Error(`The playable references missing symbol "${symbolId}".`);
+  }
+
+  return symbol;
+}
+
+function resolveSymbolLayout(
+  layout: readonly (readonly string[])[],
+  symbols: readonly PlayableSymbol[],
+): PlayableSymbol[][] {
+  if (layout.length !== REEL_COLUMNS) {
+    throw new Error(`A reel outcome requires exactly ${REEL_COLUMNS} columns.`);
+  }
+
+  const symbolsById = new Map(symbols.map((symbol) => [symbol.id, symbol]));
+
+  return layout.map((column) => {
+    if (column.length !== REEL_ROWS) {
+      throw new Error(`Each reel outcome column requires ${REEL_ROWS} rows.`);
+    }
+
+    return column.map((symbolId) => {
+      const symbol = symbolsById.get(symbolId);
+
+      if (!symbol) {
+        throw new Error(`The reel outcome references missing symbol "${symbolId}".`);
+      }
+
+      return symbol;
+    });
+  });
+}
+
+function findSymbolCells(
+  layout: readonly (readonly PlayableSymbol[])[],
+  symbolId: string,
+): AnimatedCell[] {
+  const cells: AnimatedCell[] = [];
+
+  layout.forEach((column, reelIndex) => {
+    column.forEach((symbol, rowIndex) => {
+      if (symbol.id === symbolId) {
+        cells.push({ reelIndex, rowIndex });
+      }
+    });
+  });
+
+  return cells;
 }
 
 function smoothStep(progress: number): number {

@@ -1,4 +1,6 @@
 import { Assets, Texture } from 'pixi.js';
+import buffaloVictorySheetUrl from '../assets/runtime/animations/buffalo-victory-sheet.jpg?url';
+import wolfHowlSheetUrl from '../assets/runtime/animations/wolf-howl-sheet.jpg?url';
 import logoUrl from '../assets/runtime/ui/game-logo.png?url';
 import glovePointerUrl from '../assets/runtime/ui/leather-glove-pointer.png?url';
 
@@ -12,6 +14,7 @@ const symbolAssetModules = import.meta.glob<string>(
 );
 
 const SYMBOL_SCALE_MULTIPLIERS: Readonly<Record<string, number>> = {
+  '01_WILD': 1.2,
   '09_Buffalo': 1.3,
 };
 
@@ -26,9 +29,11 @@ export interface PlayableSymbol {
 }
 
 export interface PlayableTextures {
+  buffaloVictorySheet: Texture;
   glovePointer: Texture;
   logo: Texture;
   symbols: PlayableSymbol[];
+  wolfHowlSheet: Texture;
 }
 
 export async function loadPlayableTextures(): Promise<PlayableTextures> {
@@ -36,9 +41,12 @@ export async function loadPlayableTextures(): Promise<PlayableTextures> {
     ...symbolAssets.map(({ url }) => url),
     logoUrl,
     glovePointerUrl,
+    buffaloVictorySheetUrl,
+    wolfHowlSheetUrl,
   ]);
 
   return {
+    buffaloVictorySheet: Texture.from(buffaloVictorySheetUrl),
     glovePointer: Texture.from(glovePointerUrl),
     logo: Texture.from(logoUrl),
     symbols: symbolAssets.map(({ id, url }) => ({
@@ -46,6 +54,7 @@ export async function loadPlayableTextures(): Promise<PlayableTextures> {
       texture: Texture.from(url),
       scale: SYMBOL_SCALE_MULTIPLIERS[id] ?? 1,
     })),
+    wolfHowlSheet: Texture.from(wolfHowlSheetUrl),
   };
 }
 

@@ -31,6 +31,8 @@ async function bootstrap(): Promise<void> {
     textures.symbols,
     textures.logo,
     textures.glovePointer,
+    textures.wolfHowlSheet,
+    textures.buffaloVictorySheet,
     app.ticker,
   );
 
