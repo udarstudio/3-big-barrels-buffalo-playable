@@ -27,11 +27,17 @@ async function bootstrap(): Promise<void> {
   });
 
   const textures = await loadPlayableTextures();
-  const scene = createReelScene(textures.symbols, textures.logo);
+  const scene = createReelScene(
+    textures.symbols,
+    textures.logo,
+    textures.glovePointer,
+    app.ticker,
+  );
 
   app.canvas.setAttribute('aria-label', 'Randomized slot reel prototype');
   host.replaceChildren(app.canvas);
   app.stage.addChild(scene);
+  app.ticker.start();
 
   const resize = (): void => {
     const width = host.clientWidth;

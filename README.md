@@ -22,6 +22,7 @@ The production build is emitted as a self-contained `dist/index.html` file. The 
 - Single-file production bundling
 - Runtime copies of all 19 supplied symbols
 - Randomized 5×3 reel prototype
-- Tap-to-shuffle interaction
+- Ticker-driven reel spin with acceleration and deceleration
+- Staggered left-to-right reel stops with landing bounce
 
-Spin animation, win logic, audio, MRAID behavior, and creative sequencing are intentionally not included yet.
+Win logic, audio, MRAID behavior, and creative sequencing are intentionally not included yet.
