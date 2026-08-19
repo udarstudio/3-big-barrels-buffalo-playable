@@ -1,6 +1,7 @@
 import { Assets, Texture } from 'pixi.js';
 import buffaloVictorySheetUrl from '../assets/runtime/animations/buffalo-victory-sheet.jpg?url';
 import wolfHowlSheetUrl from '../assets/runtime/animations/wolf-howl-sheet.jpg?url';
+import featureMachinesUrl from '../assets/runtime/ui/feature-machines.png?url';
 import logoUrl from '../assets/runtime/ui/game-logo.png?url';
 import glovePointerUrl from '../assets/runtime/ui/leather-glove-pointer.png?url';
 
@@ -30,6 +31,7 @@ export interface PlayableSymbol {
 
 export interface PlayableTextures {
   buffaloVictorySheet: Texture;
+  featureMachines: Texture;
   glovePointer: Texture;
   logo: Texture;
   symbols: PlayableSymbol[];
@@ -41,12 +43,14 @@ export async function loadPlayableTextures(): Promise<PlayableTextures> {
     ...symbolAssets.map(({ url }) => url),
     logoUrl,
     glovePointerUrl,
+    featureMachinesUrl,
     buffaloVictorySheetUrl,
     wolfHowlSheetUrl,
   ]);
 
   return {
     buffaloVictorySheet: Texture.from(buffaloVictorySheetUrl),
+    featureMachines: Texture.from(featureMachinesUrl),
     glovePointer: Texture.from(glovePointerUrl),
     logo: Texture.from(logoUrl),
     symbols: symbolAssets.map(({ id, url }) => ({

@@ -9,6 +9,8 @@ import {
   Texture,
   Ticker,
 } from 'pixi.js';
+import { createPlayableAudio } from './audio';
+import { createFeatureHeader } from './feature-header';
 import type { PlayableSymbol } from './symbols';
 
 const REEL_COLUMNS = 5;
@@ -30,12 +32,16 @@ const SYMBOL_SIZE = CELL_WIDTH;
 const SPIN_BUTTON_WIDTH = 300;
 const SPIN_BUTTON_HEIGHT = 100;
 const SPIN_BUTTON_INSET = 10;
-const SPIN_BUTTON_Y = 308;
+const SPIN_BUTTON_Y = 470;
 const SPIN_BUTTON_SHADOW_OFFSET = 8;
 const SPIN_BUTTON_PRESS_SCALE = 0.96;
+const LOGO_WIDTH = 420;
+const LOGO_Y = -460;
+const FEATURE_HEADER_Y = -140;
+const REEL_Y = 155;
 const GUIDE_HAND_HEIGHT = 240;
 const GUIDE_HAND_TARGET_X = 20;
-const GUIDE_HAND_TARGET_Y = SPIN_BUTTON_Y + 30;
+const GUIDE_HAND_TARGET_Y = 30;
 const GUIDE_HAND_ROTATION = Math.PI * 0.8;
 const GUIDE_HAND_TAP_DISTANCE = 14;
 const GUIDE_HAND_TAP_CYCLE_MS = 900;
@@ -43,15 +49,20 @@ const GUIDE_HAND_REAPPEAR_DELAY_MS = 3000;
 const WIN_ANIMATION_FRAME_MS = 70;
 const WIN_ANIMATION_PAUSE_MS = 400;
 const BUFFALO_SYMBOL_ID = '09_Buffalo';
+const WILD_SYMBOL_ID = '01_WILD';
 const WOLF_SYMBOL_ID = '12_Wolf';
+const WILD_ROCK_ANGLE = Math.PI / 18;
+const WILD_ROCK_CYCLE_MS = 2000;
 const REEL_BUFFER_ROWS = 2;
 const REEL_SPRITE_COUNT = REEL_ROWS + REEL_BUFFER_ROWS;
 const SPIN_ACCELERATION_MS = 300;
 const SPIN_DECELERATION_MS = 600;
+const LATE_REEL_ACCELERATION_MS = 150;
+const LATE_REEL_DECELERATION_MS = 300;
 const FIRST_REEL_DURATION_MS = 1500;
-const REEL_STOP_STAGGER_MS = 300;
+const BASE_REEL_STOP_GAP_MS = 500;
 const FIRST_REEL_STEPS = 10;
-const EXTRA_STEPS_PER_REEL = 3;
+const REEL_SPEED_INCREASE_PER_COLUMN = 0.1;
 const LANDING_BOUNCE_MS = 300;
 const LANDING_BOUNCE_DISTANCE = 12;
 const BUFFER_FADE_IN_MS = 160;
@@ -64,7 +75,7 @@ const SMALL_WIN_LAYOUT = [
   ['15_A', '12_Wolf', '18_J'],
   ['11_Cougar', '12_Wolf', '10_Bear'],
   ['14_Snake', '12_Wolf', '17_Q'],
-  ['16_K', '10_Bear', '13_Eagle'],
+  ['16_K', '12_Wolf', '13_Eagle'],
   ['13_Eagle', '11_Cougar', '19_10'],
 ] as const;
 const BIG_WIN_LAYOUT = [
@@ -86,6 +97,12 @@ interface AnimatedCell {
   rowIndex: number;
 }
 
+interface SpinSegment {
+  duration: number;
+  startSpeed: number;
+  endSpeed: number;
+}
+
 interface WinDecoration {
   above: Container;
   behind: Container;
@@ -99,35 +116,56 @@ export function createReelScene(
   glovePointerTexture: Texture,
   wolfHowlSheetTexture: Texture,
   buffaloVictorySheetTexture: Texture,
+  featureMachinesTexture: Texture,
   ticker: Ticker,
 ): Container {
   const scene = new Container();
+  const audio = createPlayableAudio();
   const reel = createReelGrid(
     symbols,
     wolfHowlSheetTexture,
     buffaloVictorySheetTexture,
     ticker,
   );
-  reel.view.position.set(0, 30);
+  reel.view.position.set(0, REEL_Y);
 
   const logo = new Sprite(logoTexture);
   logo.anchor.set(0.5);
-  logo.scale.set(330 / logoTexture.width);
-  logo.position.set(0, -285);
+  logo.scale.set(LOGO_WIDTH / logoTexture.width);
+  logo.position.set(0, LOGO_Y);
+
+  const featureHeader = createFeatureHeader(featureMachinesTexture);
+  featureHeader.position.set(0, FEATURE_HEADER_Y);
 
   const spinGuide = createSpinGuide(glovePointerTexture, ticker);
   const spinButton = createSpinButton(async () => {
     spinGuide.dismiss();
+    audio.playReelSpin();
+    let isComplete = false;
 
     try {
-      await reel.spin();
+      isComplete = await reel.spin();
+
+      if (isComplete) {
+        audio.playBuffaloWin();
+      } else {
+        audio.playWolfWin();
+      }
+
+      return isComplete;
     } finally {
-      spinGuide.scheduleReappearance();
+      audio.stopReelSpin();
+
+      if (!isComplete) {
+        spinGuide.scheduleReappearance();
+      }
     }
   });
-  spinButton.position.set(0, SPIN_BUTTON_Y);
+  const controls = new Container();
+  controls.position.set(0, SPIN_BUTTON_Y);
+  controls.addChild(spinButton, spinGuide.view);
 
-  scene.addChild(logo, reel.view, spinButton, spinGuide.view);
+  scene.addChild(logo, featureHeader, reel.view, controls);
   return scene;
 }
 
@@ -215,7 +253,7 @@ function createReelGrid(
   ticker: Ticker,
 ): {
   view: Container;
-  spin: () => Promise<void>;
+  spin: () => Promise<boolean>;
 } {
   if (symbols.length === 0) {
     throw new Error('The reel requires at least one symbol texture.');
@@ -305,7 +343,7 @@ function createReelGrid(
   cells.mask = cellsMask;
   const winOverlay = new Container();
 
-  const spin = async (): Promise<void> => {
+  const spin = async (): Promise<boolean> => {
     stopWinAnimation?.();
     stopWinAnimation = undefined;
 
@@ -337,10 +375,12 @@ function createReelGrid(
         winOverlay,
         ticker,
         createBuffaloWinDecoration,
+        findSymbolCells(targetLayout, WILD_SYMBOL_ID),
       );
     }
 
     spinIndex += 1;
+    return spinIndex >= outcomeLayouts.length;
   };
 
   const reelFrame = createReelFrame();
@@ -413,7 +453,7 @@ function drawFramePin(pins: Graphics, x: number, y: number): void {
     .fill({ color: 0xffed8a });
 }
 
-function createSpinButton(onSpin: () => Promise<void>): Container {
+function createSpinButton(onSpin: () => Promise<boolean>): Container {
   const button = new Container();
   const halfWidth = SPIN_BUTTON_WIDTH * 0.5;
   const halfHeight = SPIN_BUTTON_HEIGHT * 0.5;
@@ -466,10 +506,10 @@ function createSpinButton(onSpin: () => Promise<void>): Container {
     text: 'SPIN',
     style: {
       fill: 0x2b1a0d,
-      fontFamily: 'Arial, sans-serif',
+      fontFamily: 'Roboto Slab, Georgia, serif',
       fontSize: 44,
-      fontWeight: '900',
-      letterSpacing: 3,
+      fontWeight: '800',
+      letterSpacing: 2,
       stroke: { color: 0xb9a77c, width: 2 },
     },
   });
@@ -480,28 +520,29 @@ function createSpinButton(onSpin: () => Promise<void>): Container {
   };
 
   let isSpinning = false;
+  let isPermanentlyDisabled = false;
+
+  const setDisabled = (isDisabled: boolean): void => {
+    button.eventMode = isDisabled ? 'none' : 'static';
+    button.cursor = isDisabled ? 'default' : 'pointer';
+    button.tint = isDisabled ? 0xc8c8c8 : 0xffffff;
+  };
 
   const runSpin = async (): Promise<void> => {
-    if (isSpinning) {
+    if (isSpinning || isPermanentlyDisabled) {
       return;
     }
 
     isSpinning = true;
-    button.eventMode = 'none';
-    button.cursor = 'default';
-    label.text = 'SPINNING';
-    label.style.fontSize = 30;
+    setDisabled(true);
 
     try {
-      await onSpin();
+      isPermanentlyDisabled = await onSpin();
     } catch (error) {
       console.error('The reel spin could not be completed.', error);
     } finally {
       isSpinning = false;
-      button.eventMode = 'static';
-      button.cursor = 'pointer';
-      label.text = 'SPIN';
-      label.style.fontSize = 44;
+      setDisabled(isPermanentlyDisabled);
       releaseButton();
     }
   };
@@ -640,8 +681,12 @@ function startSymbolWinAnimation(
   winOverlay: Container,
   ticker: Ticker,
   createDecoration?: () => WinDecoration,
+  rockingCells: readonly AnimatedCell[] = [],
 ): () => void {
   const winningSprites = animatedCells.map(
+    ({ reelIndex, rowIndex }) => reels[reelIndex].sprites[rowIndex + 1],
+  );
+  const rockingSprites = rockingCells.map(
     ({ reelIndex, rowIndex }) => reels[reelIndex].sprites[rowIndex + 1],
   );
   const animatedOverlays = winningSprites.map((sprite, index) => {
@@ -690,6 +735,11 @@ function startSymbolWinAnimation(
     animatedOverlays.forEach(({ decoration }) => {
       decoration?.update(effectElapsed);
     });
+    rockingSprites.forEach((sprite) => {
+      sprite.rotation =
+        Math.sin((effectElapsed / WILD_ROCK_CYCLE_MS) * Math.PI * 2) *
+        WILD_ROCK_ANGLE;
+    });
 
     const animationIndex = elapsed < animationDuration
       ? Math.floor(elapsed / WIN_ANIMATION_FRAME_MS)
@@ -715,6 +765,9 @@ function startSymbolWinAnimation(
     winningSprites.forEach((sprite) => {
       setSymbol(sprite, symbol);
       sprite.visible = true;
+    });
+    rockingSprites.forEach((sprite) => {
+      sprite.rotation = 0;
     });
   };
 }
@@ -782,8 +835,12 @@ async function spinReel(
   setBufferSymbolsVisible(reel, true);
   setBufferSymbolsAlpha(reel, 0);
 
-  const duration = FIRST_REEL_DURATION_MS + reelIndex * REEL_STOP_STAGGER_MS;
-  const steps = FIRST_REEL_STEPS + reelIndex * EXTRA_STEPS_PER_REEL;
+  const cumulativeStopGap = (reelIndex * (reelIndex + 1)) / 2;
+  const duration =
+    FIRST_REEL_DURATION_MS +
+    cumulativeStopGap * BASE_REEL_STOP_GAP_MS;
+  const spinProfile = createSpinProfile(reelIndex, duration);
+  const steps = Math.round(spinProfile.totalDistance / CELL_HEIGHT);
   const totalDistance = steps * CELL_HEIGHT;
   let previousDistance = 0;
   let completedSteps = 0;
@@ -798,7 +855,7 @@ async function spinReel(
   };
 
   await animateWithTicker(ticker, duration, (elapsed) => {
-    const currentDistance = getSpinDistance(elapsed, duration, totalDistance);
+    const currentDistance = spinProfile.getDistance(elapsed, totalDistance);
     advanceReel(reel, currentDistance - previousDistance, getNextSymbol);
     setBufferSymbolsAlpha(
       reel,
@@ -827,49 +884,112 @@ async function spinReel(
   setBufferSymbolsAlpha(reel, 0);
 }
 
-function getSpinDistance(
-  elapsed: number,
+function createSpinProfile(
+  reelIndex: number,
   duration: number,
-  totalDistance: number,
-): number {
-  const cruiseDuration =
-    duration - SPIN_ACCELERATION_MS - SPIN_DECELERATION_MS;
-  const velocityProfileArea =
-    cruiseDuration + (SPIN_ACCELERATION_MS + SPIN_DECELERATION_MS) * 0.5;
-  const maximumSpeed = totalDistance / velocityProfileArea;
+): {
+  totalDistance: number;
+  getDistance: (elapsed: number, targetDistance: number) => number;
+} {
+  const firstReelVelocityArea =
+    FIRST_REEL_DURATION_MS -
+    (SPIN_ACCELERATION_MS + SPIN_DECELERATION_MS) * 0.5;
+  const baseSpeed =
+    (FIRST_REEL_STEPS * CELL_HEIGHT) / firstReelVelocityArea;
+  const segments: SpinSegment[] = [
+    {
+      duration: SPIN_ACCELERATION_MS,
+      startSpeed: 0,
+      endSpeed: baseSpeed,
+    },
+  ];
+  let landingDuration = SPIN_DECELERATION_MS;
 
-  if (elapsed <= SPIN_ACCELERATION_MS) {
-    return (
-      0.5 *
-      (maximumSpeed / SPIN_ACCELERATION_MS) *
-      elapsed *
-      elapsed
+  if (reelIndex < 2) {
+    segments.push(
+      {
+        duration: duration - SPIN_ACCELERATION_MS - SPIN_DECELERATION_MS,
+        startSpeed: baseSpeed,
+        endSpeed: baseSpeed,
+      },
+      {
+        duration: SPIN_DECELERATION_MS,
+        startSpeed: baseSpeed,
+        endSpeed: 0,
+      },
+    );
+  } else {
+    const speedUpStart = FIRST_REEL_DURATION_MS + BASE_REEL_STOP_GAP_MS;
+    const boostedSpeed =
+      baseSpeed * (1 + reelIndex * REEL_SPEED_INCREASE_PER_COLUMN);
+    landingDuration = LATE_REEL_DECELERATION_MS;
+    segments.push(
+      {
+        duration: speedUpStart - SPIN_ACCELERATION_MS,
+        startSpeed: baseSpeed,
+        endSpeed: baseSpeed,
+      },
+      {
+        duration: LATE_REEL_ACCELERATION_MS,
+        startSpeed: baseSpeed,
+        endSpeed: boostedSpeed,
+      },
+      {
+        duration:
+          duration -
+          speedUpStart -
+          LATE_REEL_ACCELERATION_MS -
+          LATE_REEL_DECELERATION_MS,
+        startSpeed: boostedSpeed,
+        endSpeed: boostedSpeed,
+      },
+      {
+        duration: LATE_REEL_DECELERATION_MS,
+        startSpeed: boostedSpeed,
+        endSpeed: 0,
+      },
     );
   }
 
-  const accelerationDistance =
-    maximumSpeed * SPIN_ACCELERATION_MS * 0.5;
+  const getRawDistance = (elapsed: number): number => {
+    let remainingTime = elapsed;
+    let distance = 0;
 
-  if (elapsed <= SPIN_ACCELERATION_MS + cruiseDuration) {
-    return (
-      accelerationDistance +
-      maximumSpeed * (elapsed - SPIN_ACCELERATION_MS)
-    );
-  }
+    for (const segment of segments) {
+      const segmentTime = Math.min(Math.max(remainingTime, 0), segment.duration);
+      const acceleration =
+        (segment.endSpeed - segment.startSpeed) / segment.duration;
+      distance +=
+        segment.startSpeed * segmentTime +
+        0.5 * acceleration * segmentTime * segmentTime;
+      remainingTime -= segmentTime;
 
-  const decelerationElapsed =
-    elapsed - SPIN_ACCELERATION_MS - cruiseDuration;
-  const distanceBeforeDeceleration =
-    accelerationDistance + maximumSpeed * cruiseDuration;
+      if (remainingTime <= 0) {
+        break;
+      }
+    }
 
-  return (
-    distanceBeforeDeceleration +
-    maximumSpeed * decelerationElapsed -
-    0.5 *
-      (maximumSpeed / SPIN_DECELERATION_MS) *
-      decelerationElapsed *
-      decelerationElapsed
-  );
+    return distance;
+  };
+
+  const totalDistance = getRawDistance(duration);
+  const landingStart = duration - landingDuration;
+
+  return {
+    totalDistance,
+    getDistance: (elapsed: number, targetDistance: number): number => {
+      const landingProgress = Math.min(
+        Math.max((elapsed - landingStart) / landingDuration, 0),
+        1,
+      );
+      const landingCorrection = targetDistance - totalDistance;
+
+      return (
+        getRawDistance(elapsed) +
+        landingCorrection * smoothStep(landingProgress)
+      );
+    },
+  };
 }
 
 function animateWithTicker(

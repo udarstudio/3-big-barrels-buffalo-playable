@@ -26,6 +26,8 @@ async function bootstrap(): Promise<void> {
     preference: 'webgl',
   });
 
+  await document.fonts.load('800 44px "Roboto Slab"');
+
   const textures = await loadPlayableTextures();
   const scene = createReelScene(
     textures.symbols,
@@ -33,6 +35,7 @@ async function bootstrap(): Promise<void> {
     textures.glovePointer,
     textures.wolfHowlSheet,
     textures.buffaloVictorySheet,
+    textures.featureMachines,
     app.ticker,
   );
 
