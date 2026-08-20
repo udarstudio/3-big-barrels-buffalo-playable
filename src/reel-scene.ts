@@ -11,6 +11,7 @@ import { createPlayableAudio } from './audio';
 import { createCoinBurst } from './coin-burst';
 import { createEndCard } from './end-card';
 import { createFeatureHeader } from './feature-header';
+import { createGuideHand } from './guide-hand';
 import { createMachineButton } from './machine-button';
 import type { PlayableSymbol } from './symbols';
 
@@ -40,13 +41,6 @@ const FEATURE_POT_TARGETS = [-130, 0, 130].map((x) => ({
   x,
   y: FEATURE_POT_TARGET_Y,
 }));
-const GUIDE_HAND_HEIGHT = 240;
-const GUIDE_HAND_TARGET_X = 20;
-const GUIDE_HAND_TARGET_Y = 30;
-const GUIDE_HAND_ROTATION = Math.PI * 0.8;
-const GUIDE_HAND_TAP_DISTANCE = 14;
-const GUIDE_HAND_TAP_CYCLE_MS = 900;
-const GUIDE_HAND_REAPPEAR_DELAY_MS = 3000;
 const WIN_ANIMATION_FRAME_MS = 70;
 const WIN_ANIMATION_PAUSE_MS = 400;
 const BUFFALO_SYMBOL_ID = '09_Buffalo';
@@ -118,13 +112,25 @@ export function createReelScene(
   buffaloVictorySheetTexture: Texture,
   featureMachinesTexture: Texture,
   winGlowTexture: Texture,
-  coinPileTexture: Texture,
+  coinFillPortraitTexture: Texture,
+  coinFillLandscapeTexture: Texture,
   ticker: Ticker,
 ): Container {
   const scene = new Container();
   const gameplay = new Container();
   const audio = createPlayableAudio();
-  const endCard = createEndCard(logoTexture, coinPileTexture, ticker);
+  const endCard = createEndCard(
+    logoTexture,
+    glovePointerTexture,
+    coinFillPortraitTexture,
+    coinFillLandscapeTexture,
+    ticker,
+    {
+      playCoinRain: audio.playCoinRain,
+      setCoinRainVolume: audio.setCoinRainVolume,
+      stopCoinRain: audio.stopCoinRain,
+    },
+  );
   const reel = createReelGrid(
     symbols,
     wolfHowlSheetTexture,
@@ -142,7 +148,7 @@ export function createReelScene(
   const featureHeader = createFeatureHeader(featureMachinesTexture);
   featureHeader.position.set(0, FEATURE_HEADER_Y);
 
-  const spinGuide = createSpinGuide(glovePointerTexture, ticker);
+  const spinGuide = createGuideHand(glovePointerTexture, ticker);
   const spinButton = createSpinButton(async () => {
     spinGuide.dismiss();
     audio.startMusic();
@@ -175,83 +181,6 @@ export function createReelScene(
   gameplay.addChild(logo, featureHeader, reel.view, controls);
   scene.addChild(gameplay, endCard.view);
   return scene;
-}
-
-function createSpinGuide(
-  texture: Texture,
-  ticker: Ticker,
-): {
-  view: Sprite;
-  dismiss: () => void;
-  scheduleReappearance: () => void;
-} {
-  const hand = new Sprite(texture);
-  const baseScale = GUIDE_HAND_HEIGHT / texture.height;
-  let elapsed = 0;
-  let isDismissed = false;
-  let reappearTimer: number | undefined;
-
-  hand.anchor.set(0.5, 0.955);
-  hand.rotation = GUIDE_HAND_ROTATION;
-  hand.eventMode = 'none';
-
-  const resetTapAnimation = (): void => {
-    elapsed = 0;
-    hand.position.set(GUIDE_HAND_TARGET_X, GUIDE_HAND_TARGET_Y);
-    hand.scale.set(baseScale);
-  };
-
-  resetTapAnimation();
-
-  const animateTap = (activeTicker: Ticker): void => {
-    elapsed += activeTicker.deltaMS;
-
-    const cycleProgress =
-      (elapsed % GUIDE_HAND_TAP_CYCLE_MS) / GUIDE_HAND_TAP_CYCLE_MS;
-    const tapProgress = cycleProgress < 0.55
-      ? Math.sin((cycleProgress / 0.55) * Math.PI)
-      : 0;
-
-    const tapDistance = tapProgress * GUIDE_HAND_TAP_DISTANCE;
-    hand.position.set(
-      GUIDE_HAND_TARGET_X - Math.sin(GUIDE_HAND_ROTATION) * tapDistance,
-      GUIDE_HAND_TARGET_Y + Math.cos(GUIDE_HAND_ROTATION) * tapDistance,
-    );
-    hand.scale.set(baseScale * (1 + tapProgress * 0.025));
-  };
-
-  ticker.add(animateTap);
-
-  const dismiss = (): void => {
-    if (reappearTimer !== undefined) {
-      window.clearTimeout(reappearTimer);
-      reappearTimer = undefined;
-    }
-
-    if (isDismissed) {
-      return;
-    }
-
-    isDismissed = true;
-    ticker.remove(animateTap);
-    hand.visible = false;
-    resetTapAnimation();
-  };
-
-  const scheduleReappearance = (): void => {
-    if (reappearTimer !== undefined) {
-      window.clearTimeout(reappearTimer);
-    }
-
-    reappearTimer = window.setTimeout(() => {
-      reappearTimer = undefined;
-      isDismissed = false;
-      hand.visible = true;
-      ticker.add(animateTap);
-    }, GUIDE_HAND_REAPPEAR_DELAY_MS);
-  };
-
-  return { view: hand, dismiss, scheduleReappearance };
 }
 
 function createReelGrid(

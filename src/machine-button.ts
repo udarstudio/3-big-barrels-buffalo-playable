@@ -1,10 +1,13 @@
 import { Container, Graphics, Rectangle, Text } from 'pixi.js';
+import buttonClickUrl from '../assets/runtime/audio/button-click.mp3?url';
 
 const BUTTON_WIDTH = 300;
 const BUTTON_HEIGHT = 100;
 const BUTTON_INSET = 10;
 const BUTTON_SHADOW_OFFSET = 8;
 const BUTTON_PRESS_SCALE = 0.96;
+const BUTTON_CLICK_VOLUME = 0.65;
+let buttonClick: HTMLAudioElement | undefined;
 
 export interface MachineButton {
   view: Container;
@@ -83,7 +86,10 @@ export function createMachineButton(
   );
   view.eventMode = 'static';
   view.cursor = 'pointer';
-  view.on('pointerdown', () => view.scale.set(BUTTON_PRESS_SCALE));
+  view.on('pointerdown', () => {
+    playButtonClick();
+    view.scale.set(BUTTON_PRESS_SCALE);
+  });
   view.on('pointerup', release);
   view.on('pointerupoutside', release);
   view.on('pointerout', release);
@@ -96,4 +102,14 @@ export function createMachineButton(
       view.tint = isDisabled ? 0xc8c8c8 : 0xffffff;
     },
   };
+}
+
+function playButtonClick(): void {
+  buttonClick ??= new Audio(buttonClickUrl);
+  buttonClick.volume = BUTTON_CLICK_VOLUME;
+  buttonClick.currentTime = 0;
+
+  void buttonClick.play().catch(() => {
+    // Some preview environments block sound until the first user gesture.
+  });
 }

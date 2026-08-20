@@ -1,7 +1,8 @@
 import { Assets, Texture } from 'pixi.js';
 import buffaloVictorySheetUrl from '../assets/runtime/animations/buffalo-victory-sheet.jpg?url';
 import wolfHowlSheetUrl from '../assets/runtime/animations/wolf-howl-sheet.jpg?url';
-import coinPileUrl from '../assets/runtime/ui/coin-pile.png?url';
+import coinFillLandscapeUrl from '../assets/runtime/ui/coin-fill-1920x1080.png?url';
+import coinFillPortraitUrl from '../assets/runtime/ui/coin-fill-1080x1920.png?url';
 import featureMachinesUrl from '../assets/runtime/ui/feature-machines.png?url';
 import logoUrl from '../assets/runtime/ui/game-logo.png?url';
 import glovePointerUrl from '../assets/runtime/ui/leather-glove-pointer.png?url';
@@ -33,7 +34,8 @@ export interface PlayableSymbol {
 
 export interface PlayableTextures {
   buffaloVictorySheet: Texture;
-  coinPile: Texture;
+  coinFillLandscape: Texture;
+  coinFillPortrait: Texture;
   featureMachines: Texture;
   glovePointer: Texture;
   logo: Texture;
@@ -51,12 +53,14 @@ export async function loadPlayableTextures(): Promise<PlayableTextures> {
     buffaloVictorySheetUrl,
     wolfHowlSheetUrl,
     winGlowUrl,
-    coinPileUrl,
+    coinFillLandscapeUrl,
+    coinFillPortraitUrl,
   ]);
 
   return {
     buffaloVictorySheet: Texture.from(buffaloVictorySheetUrl),
-    coinPile: Texture.from(coinPileUrl),
+    coinFillLandscape: Texture.from(coinFillLandscapeUrl),
+    coinFillPortrait: Texture.from(coinFillPortraitUrl),
     featureMachines: Texture.from(featureMachinesUrl),
     glovePointer: Texture.from(glovePointerUrl),
     logo: Texture.from(logoUrl),

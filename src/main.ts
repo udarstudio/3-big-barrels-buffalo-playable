@@ -37,7 +37,8 @@ async function bootstrap(): Promise<void> {
     textures.buffaloVictorySheet,
     textures.featureMachines,
     textures.winGlow,
-    textures.coinPile,
+    textures.coinFillPortrait,
+    textures.coinFillLandscape,
     app.ticker,
   );
 
