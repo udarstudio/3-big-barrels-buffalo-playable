@@ -1,16 +1,17 @@
 import {
-  BlurFilter,
   Container,
   FillGradient,
   Graphics,
   Rectangle,
   Sprite,
-  Text,
   Texture,
   Ticker,
 } from 'pixi.js';
 import { createPlayableAudio } from './audio';
+import { createCoinBurst } from './coin-burst';
+import { createEndCard } from './end-card';
 import { createFeatureHeader } from './feature-header';
+import { createMachineButton } from './machine-button';
 import type { PlayableSymbol } from './symbols';
 
 const REEL_COLUMNS = 5;
@@ -29,16 +30,16 @@ const REEL_CONTENT_TOP = -REEL_CONTENT_HEIGHT * 0.5;
 const CELL_WIDTH = REEL_CONTENT_WIDTH / REEL_COLUMNS;
 const CELL_HEIGHT = REEL_CONTENT_HEIGHT / REEL_ROWS;
 const SYMBOL_SIZE = CELL_WIDTH;
-const SPIN_BUTTON_WIDTH = 300;
-const SPIN_BUTTON_HEIGHT = 100;
-const SPIN_BUTTON_INSET = 10;
-const SPIN_BUTTON_Y = 470;
-const SPIN_BUTTON_SHADOW_OFFSET = 8;
-const SPIN_BUTTON_PRESS_SCALE = 0.96;
-const LOGO_WIDTH = 420;
-const LOGO_Y = -460;
-const FEATURE_HEADER_Y = -140;
-const REEL_Y = 155;
+const SPIN_BUTTON_Y = 315;
+const LOGO_WIDTH = 280;
+const LOGO_Y = -520;
+const FEATURE_HEADER_Y = -295;
+const REEL_Y = 0;
+const FEATURE_POT_TARGET_Y = FEATURE_HEADER_Y - REEL_Y + 40;
+const FEATURE_POT_TARGETS = [-130, 0, 130].map((x) => ({
+  x,
+  y: FEATURE_POT_TARGET_Y,
+}));
 const GUIDE_HAND_HEIGHT = 240;
 const GUIDE_HAND_TARGET_X = 20;
 const GUIDE_HAND_TARGET_Y = 30;
@@ -52,7 +53,6 @@ const BUFFALO_SYMBOL_ID = '09_Buffalo';
 const WILD_SYMBOL_ID = '01_WILD';
 const WOLF_SYMBOL_ID = '12_Wolf';
 const WILD_ROCK_ANGLE = Math.PI / 18;
-const WILD_ROCK_CYCLE_MS = 2000;
 const REEL_BUFFER_ROWS = 2;
 const REEL_SPRITE_COUNT = REEL_ROWS + REEL_BUFFER_ROWS;
 const SPIN_ACCELERATION_MS = 300;
@@ -106,7 +106,7 @@ interface SpinSegment {
 interface WinDecoration {
   above: Container;
   behind: Container;
-  update: (elapsedMs: number) => void;
+  update: (elapsedMs: number, cycleDurationMs: number) => void;
   destroy: () => void;
 }
 
@@ -117,14 +117,19 @@ export function createReelScene(
   wolfHowlSheetTexture: Texture,
   buffaloVictorySheetTexture: Texture,
   featureMachinesTexture: Texture,
+  winGlowTexture: Texture,
+  coinPileTexture: Texture,
   ticker: Ticker,
 ): Container {
   const scene = new Container();
+  const gameplay = new Container();
   const audio = createPlayableAudio();
+  const endCard = createEndCard(logoTexture, coinPileTexture, ticker);
   const reel = createReelGrid(
     symbols,
     wolfHowlSheetTexture,
     buffaloVictorySheetTexture,
+    winGlowTexture,
     ticker,
   );
   reel.view.position.set(0, REEL_Y);
@@ -140,6 +145,7 @@ export function createReelScene(
   const spinGuide = createSpinGuide(glovePointerTexture, ticker);
   const spinButton = createSpinButton(async () => {
     spinGuide.dismiss();
+    audio.startMusic();
     audio.playReelSpin();
     let isComplete = false;
 
@@ -148,6 +154,7 @@ export function createReelScene(
 
       if (isComplete) {
         audio.playBuffaloWin();
+        void endCard.show(gameplay);
       } else {
         audio.playWolfWin();
       }
@@ -165,7 +172,8 @@ export function createReelScene(
   controls.position.set(0, SPIN_BUTTON_Y);
   controls.addChild(spinButton, spinGuide.view);
 
-  scene.addChild(logo, featureHeader, reel.view, controls);
+  gameplay.addChild(logo, featureHeader, reel.view, controls);
+  scene.addChild(gameplay, endCard.view);
   return scene;
 }
 
@@ -250,6 +258,7 @@ function createReelGrid(
   symbols: readonly PlayableSymbol[],
   wolfHowlSheetTexture: Texture,
   buffaloVictorySheetTexture: Texture,
+  winGlowTexture: Texture,
   ticker: Ticker,
 ): {
   view: Container;
@@ -294,8 +303,8 @@ function createReelGrid(
     colorStops: [
       { offset: 0, color: 0x7a3506 },
       { offset: 0.3, color: 0xffe98a },
-      { offset: 0.6, color: 0xe9a11a },
-      { offset: 1, color: 0x8a3d06 },
+      { offset: 0.7, color: 0xffe98a },
+      { offset: 1, color: 0x7a3506 },
     ],
     textureSpace: 'local',
   });
@@ -364,7 +373,7 @@ function createReelGrid(
         findSymbolCells(targetLayout, WOLF_SYMBOL_ID),
         winOverlay,
         ticker,
-        createWolfWinDecoration,
+        () => createWolfWinDecoration(winGlowTexture),
       );
     } else {
       stopWinAnimation = startSymbolWinAnimation(
@@ -374,8 +383,9 @@ function createReelGrid(
         findSymbolCells(targetLayout, BUFFALO_SYMBOL_ID),
         winOverlay,
         ticker,
-        createBuffaloWinDecoration,
+        () => createBuffaloWinDecoration(winGlowTexture),
         findSymbolCells(targetLayout, WILD_SYMBOL_ID),
+        false,
       );
     }
 
@@ -454,79 +464,9 @@ function drawFramePin(pins: Graphics, x: number, y: number): void {
 }
 
 function createSpinButton(onSpin: () => Promise<boolean>): Container {
-  const button = new Container();
-  const halfWidth = SPIN_BUTTON_WIDTH * 0.5;
-  const halfHeight = SPIN_BUTTON_HEIGHT * 0.5;
-  const innerWidth = SPIN_BUTTON_WIDTH - SPIN_BUTTON_INSET * 2;
-  const innerHeight = SPIN_BUTTON_HEIGHT - SPIN_BUTTON_INSET * 2;
-
-  const shadow = new Graphics()
-    .roundRect(
-      -halfWidth,
-      -halfHeight + SPIN_BUTTON_SHADOW_OFFSET,
-      SPIN_BUTTON_WIDTH,
-      SPIN_BUTTON_HEIGHT - SPIN_BUTTON_SHADOW_OFFSET,
-      20,
-    )
-    .fill({ color: 0x2b0d03 });
-
-  const frame = new Graphics()
-    .roundRect(
-      -halfWidth,
-      -halfHeight,
-      SPIN_BUTTON_WIDTH,
-      SPIN_BUTTON_HEIGHT,
-      20,
-    )
-    .fill({ color: 0x4b1806 })
-    .stroke({ color: 0xf2b84b, width: 6, alignment: 1 });
-
-  const face = new Graphics()
-    .roundRect(
-      -innerWidth * 0.5,
-      -innerHeight * 0.5,
-      innerWidth,
-      innerHeight,
-      14,
-    )
-    .fill({ color: 0xe8e4d8 })
-    .stroke({ color: 0xfff8df, width: 4, alignment: 1 });
-
-  const highlight = new Graphics()
-    .roundRect(
-      -innerWidth * 0.5 + 6,
-      -innerHeight * 0.5 + 6,
-      innerWidth - 12,
-      innerHeight * 0.42,
-      10,
-    )
-    .fill({ color: 0xffffff });
-
-  const label = new Text({
-    text: 'SPIN',
-    style: {
-      fill: 0x2b1a0d,
-      fontFamily: 'Roboto Slab, Georgia, serif',
-      fontSize: 44,
-      fontWeight: '800',
-      letterSpacing: 2,
-      stroke: { color: 0xb9a77c, width: 2 },
-    },
-  });
-  label.anchor.set(0.5);
-
-  const releaseButton = (): void => {
-    button.scale.set(1);
-  };
-
+  const button = createMachineButton('SPIN');
   let isSpinning = false;
   let isPermanentlyDisabled = false;
-
-  const setDisabled = (isDisabled: boolean): void => {
-    button.eventMode = isDisabled ? 'none' : 'static';
-    button.cursor = isDisabled ? 'default' : 'pointer';
-    button.tint = isDisabled ? 0xc8c8c8 : 0xffffff;
-  };
 
   const runSpin = async (): Promise<void> => {
     if (isSpinning || isPermanentlyDisabled) {
@@ -534,7 +474,7 @@ function createSpinButton(onSpin: () => Promise<boolean>): Container {
     }
 
     isSpinning = true;
-    setDisabled(true);
+    button.setDisabled(true);
 
     try {
       isPermanentlyDisabled = await onSpin();
@@ -542,27 +482,14 @@ function createSpinButton(onSpin: () => Promise<boolean>): Container {
       console.error('The reel spin could not be completed.', error);
     } finally {
       isSpinning = false;
-      setDisabled(isPermanentlyDisabled);
-      releaseButton();
+      button.setDisabled(isPermanentlyDisabled);
+      button.view.scale.set(1);
     }
   };
 
-  button.addChild(shadow, frame, face, highlight, label);
-  button.hitArea = new Rectangle(
-    -halfWidth,
-    -halfHeight,
-    SPIN_BUTTON_WIDTH,
-    SPIN_BUTTON_HEIGHT,
-  );
-  button.eventMode = 'static';
-  button.cursor = 'pointer';
-  button.on('pointerdown', () => button.scale.set(SPIN_BUTTON_PRESS_SCALE));
-  button.on('pointerup', releaseButton);
-  button.on('pointerupoutside', releaseButton);
-  button.on('pointerout', releaseButton);
-  button.on('pointertap', () => void runSpin());
+  button.view.on('pointertap', () => void runSpin());
 
-  return button;
+  return button.view;
 }
 
 function setSymbol(sprite: Sprite, symbol: PlayableSymbol): void {
@@ -605,40 +532,39 @@ function createAnimationFrames(sheet: Texture): Texture[] {
   });
 }
 
-function createWolfWinDecoration(): WinDecoration {
+function createWolfWinDecoration(glowTexture: Texture): WinDecoration {
   return createWinDecoration({
+    glowTexture,
     glowColor: 0x62ff45,
     borderColors: [0xfff3a1, 0xbfff68, 0x38d83f],
   });
 }
 
-function createBuffaloWinDecoration(): WinDecoration {
+function createBuffaloWinDecoration(glowTexture: Texture): WinDecoration {
   return createWinDecoration({
+    glowTexture,
     glowColor: 0xff8a1f,
     borderColors: [0xffffbd, 0xffbd3c, 0xf05a19],
   });
 }
 
 function createWinDecoration({
+  glowTexture,
   glowColor,
   borderColors,
 }: {
+  glowTexture: Texture;
   glowColor: number;
   borderColors: readonly [number, number, number];
 }): WinDecoration {
   const behind = new Container();
   const above = new Container();
   const halfSize = SYMBOL_SIZE * 0.5;
-  const glow = new Graphics()
-    .roundRect(-halfSize, -halfSize, SYMBOL_SIZE, SYMBOL_SIZE, 8)
-    .fill({ color: glowColor });
-  const glowFilter = new BlurFilter({
-    strength: 20,
-    quality: 6,
-    kernelSize: 11,
-  });
-  glowFilter.padding = 48;
-  glow.filters = [glowFilter];
+  const glow = new Sprite(glowTexture);
+  glow.anchor.set(0.5);
+  glow.tint = glowColor;
+  glow.width = SYMBOL_SIZE * 1.8;
+  glow.height = SYMBOL_SIZE * 1.8;
   glow.blendMode = 'add';
 
   const borderGradient = new FillGradient({
@@ -652,22 +578,34 @@ function createWinDecoration({
     ],
     textureSpace: 'local',
   });
-  const border = new Graphics()
-    .rect(-halfSize - 2, -halfSize - 2, SYMBOL_SIZE + 4, SYMBOL_SIZE + 4)
-    .stroke({ fill: borderGradient, width: 5, alignment: 1 });
+  const borderSize = SYMBOL_SIZE + 2;
+  const borderGradientLayer = new Graphics()
+    .rect(
+      -borderSize * Math.SQRT2 * 0.5,
+      -borderSize * Math.SQRT2 * 0.5,
+      borderSize * Math.SQRT2,
+      borderSize * Math.SQRT2,
+    )
+    .fill({ fill: borderGradient });
+  const borderMask = new Graphics()
+    .rect(-halfSize - 1, -halfSize - 1, borderSize, borderSize)
+    .stroke({ color: 0xffffff, width: 5, alignment: 1 });
+  borderGradientLayer.mask = borderMask;
 
   behind.addChild(glow);
-  above.addChild(border);
+  above.addChild(borderGradientLayer, borderMask);
 
   return {
     above,
     behind,
-    update: (elapsedMs: number): void => {
-      const pulse = (Math.sin((elapsedMs / 900) * Math.PI * 2) + 1) * 0.5;
+    update: (elapsedMs: number, cycleDurationMs: number): void => {
+      const pulse =
+        (Math.sin((elapsedMs / cycleDurationMs) * Math.PI * 2) + 1) * 0.5;
       glow.alpha = 0.25 + pulse * 0.75;
+      borderGradientLayer.rotation =
+        (elapsedMs / cycleDurationMs) * Math.PI * 2;
     },
     destroy: (): void => {
-      glowFilter.destroy();
       borderGradient.destroy();
     },
   };
@@ -682,6 +620,7 @@ function startSymbolWinAnimation(
   ticker: Ticker,
   createDecoration?: () => WinDecoration,
   rockingCells: readonly AnimatedCell[] = [],
+  showCoinBurst = true,
 ): () => void {
   const winningSprites = animatedCells.map(
     ({ reelIndex, rowIndex }) => reels[reelIndex].sprites[rowIndex + 1],
@@ -689,6 +628,19 @@ function startSymbolWinAnimation(
   const rockingSprites = rockingCells.map(
     ({ reelIndex, rowIndex }) => reels[reelIndex].sprites[rowIndex + 1],
   );
+  const coinBurst = showCoinBurst
+    ? createCoinBurst(
+        [...animatedCells, ...rockingCells].map(({ reelIndex, rowIndex }) => ({
+          x: REEL_CONTENT_LEFT + (reelIndex + 0.5) * CELL_WIDTH,
+          y: REEL_CONTENT_TOP + (rowIndex + 0.5) * CELL_HEIGHT,
+        })),
+        FEATURE_POT_TARGETS,
+      )
+    : undefined;
+
+  if (coinBurst) {
+    winOverlay.addChild(coinBurst.view);
+  }
   const animatedOverlays = winningSprites.map((sprite, index) => {
     const { reelIndex, rowIndex } = animatedCells[index];
     const overlay = new Container();
@@ -733,13 +685,14 @@ function startSymbolWinAnimation(
     elapsed = (elapsed + activeTicker.deltaMS) % cycleDuration;
     effectElapsed += activeTicker.deltaMS;
     animatedOverlays.forEach(({ decoration }) => {
-      decoration?.update(effectElapsed);
+      decoration?.update(effectElapsed, cycleDuration);
     });
     rockingSprites.forEach((sprite) => {
       sprite.rotation =
-        Math.sin((effectElapsed / WILD_ROCK_CYCLE_MS) * Math.PI * 2) *
+        Math.sin((effectElapsed / cycleDuration) * Math.PI * 2) *
         WILD_ROCK_ANGLE;
     });
+    coinBurst?.update(effectElapsed);
 
     const animationIndex = elapsed < animationDuration
       ? Math.floor(elapsed / WIN_ANIMATION_FRAME_MS)
@@ -752,11 +705,17 @@ function startSymbolWinAnimation(
   };
 
   showFrame(0);
-  animatedOverlays.forEach(({ decoration }) => decoration?.update(0));
+  animatedOverlays.forEach(({ decoration }) =>
+    decoration?.update(0, cycleDuration),
+  );
   ticker.add(animateHowl);
 
   return () => {
     ticker.remove(animateHowl);
+    if (coinBurst) {
+      winOverlay.removeChild(coinBurst.view);
+      coinBurst.destroy();
+    }
     animatedOverlays.forEach(({ decoration, overlay }) => {
       winOverlay.removeChild(overlay);
       overlay.destroy({ children: true });

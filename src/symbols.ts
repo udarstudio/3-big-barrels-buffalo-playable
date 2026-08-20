@@ -1,9 +1,11 @@
 import { Assets, Texture } from 'pixi.js';
 import buffaloVictorySheetUrl from '../assets/runtime/animations/buffalo-victory-sheet.jpg?url';
 import wolfHowlSheetUrl from '../assets/runtime/animations/wolf-howl-sheet.jpg?url';
+import coinPileUrl from '../assets/runtime/ui/coin-pile.png?url';
 import featureMachinesUrl from '../assets/runtime/ui/feature-machines.png?url';
 import logoUrl from '../assets/runtime/ui/game-logo.png?url';
 import glovePointerUrl from '../assets/runtime/ui/leather-glove-pointer.png?url';
+import winGlowUrl from '../assets/runtime/ui/win-glow.svg?url';
 
 const symbolAssetModules = import.meta.glob<string>(
   '../assets/runtime/symbols/*.png',
@@ -31,10 +33,12 @@ export interface PlayableSymbol {
 
 export interface PlayableTextures {
   buffaloVictorySheet: Texture;
+  coinPile: Texture;
   featureMachines: Texture;
   glovePointer: Texture;
   logo: Texture;
   symbols: PlayableSymbol[];
+  winGlow: Texture;
   wolfHowlSheet: Texture;
 }
 
@@ -46,10 +50,13 @@ export async function loadPlayableTextures(): Promise<PlayableTextures> {
     featureMachinesUrl,
     buffaloVictorySheetUrl,
     wolfHowlSheetUrl,
+    winGlowUrl,
+    coinPileUrl,
   ]);
 
   return {
     buffaloVictorySheet: Texture.from(buffaloVictorySheetUrl),
+    coinPile: Texture.from(coinPileUrl),
     featureMachines: Texture.from(featureMachinesUrl),
     glovePointer: Texture.from(glovePointerUrl),
     logo: Texture.from(logoUrl),
@@ -58,6 +65,7 @@ export async function loadPlayableTextures(): Promise<PlayableTextures> {
       texture: Texture.from(url),
       scale: SYMBOL_SCALE_MULTIPLIERS[id] ?? 1,
     })),
+    winGlow: Texture.from(winGlowUrl),
     wolfHowlSheet: Texture.from(wolfHowlSheetUrl),
   };
 }
