@@ -1,5 +1,5 @@
-import { Application, Container } from 'pixi.js';
-import { createReelScene } from './reel-scene';
+import { Application } from 'pixi.js';
+import { createReelScene, type ReelScene } from './reel-scene';
 import { loadPlayableTextures } from './symbols';
 import './styles.css';
 
@@ -60,7 +60,7 @@ async function bootstrap(): Promise<void> {
   resize();
 }
 
-function layoutScene(scene: Container, width: number, height: number): void {
+function layoutScene(scene: ReelScene, width: number, height: number): void {
   const isPortrait = height >= width;
   const design = isPortrait ? PORTRAIT_DESIGN : LANDSCAPE_DESIGN;
   const scale = Math.min(
@@ -70,6 +70,7 @@ function layoutScene(scene: Container, width: number, height: number): void {
 
   scene.position.set(width * 0.5, height * 0.5);
   scene.scale.set(scale);
+  scene.layoutForOrientation(isPortrait);
 }
 
 void bootstrap();

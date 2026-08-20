@@ -36,6 +36,13 @@ const LOGO_WIDTH = 280;
 const LOGO_Y = -520;
 const FEATURE_HEADER_Y = -295;
 const REEL_Y = 0;
+const LANDSCAPE_MACHINE_X = -280;
+const LANDSCAPE_REEL_Y = 95;
+const LANDSCAPE_FEATURE_HEADER_Y = LANDSCAPE_REEL_Y + FEATURE_HEADER_Y;
+const LANDSCAPE_BRAND_X = 370;
+const LANDSCAPE_LOGO_WIDTH = 330;
+const LANDSCAPE_LOGO_Y = -155;
+const LANDSCAPE_SPIN_BUTTON_Y = 125;
 const FEATURE_POT_TARGET_Y = FEATURE_HEADER_Y - REEL_Y + 40;
 const FEATURE_POT_TARGETS = [-130, 0, 130].map((x) => ({
   x,
@@ -57,6 +64,9 @@ const FIRST_REEL_DURATION_MS = 1500;
 const BASE_REEL_STOP_GAP_MS = 500;
 const FIRST_REEL_STEPS = 10;
 const REEL_SPEED_INCREASE_PER_COLUMN = 0.1;
+const REEL_STOP_PITCHES = [0.7, 0.7, 0.85, 1] as const;
+const WINNING_FINAL_REEL_PITCH = 1.2;
+const REEL_SPIN_TENSION_RATES = [1, 1.02, 1.05, 1.09] as const;
 const LANDING_BOUNCE_MS = 300;
 const LANDING_BOUNCE_DISTANCE = 12;
 const BUFFER_FADE_IN_MS = 160;
@@ -104,6 +114,10 @@ interface WinDecoration {
   destroy: () => void;
 }
 
+export interface ReelScene extends Container {
+  layoutForOrientation: (isPortrait: boolean) => void;
+}
+
 export function createReelScene(
   symbols: readonly PlayableSymbol[],
   logoTexture: Texture,
@@ -115,8 +129,8 @@ export function createReelScene(
   coinFillPortraitTexture: Texture,
   coinFillLandscapeTexture: Texture,
   ticker: Ticker,
-): Container {
-  const scene = new Container();
+): ReelScene {
+  const scene = new Container() as ReelScene;
   const gameplay = new Container();
   const audio = createPlayableAudio();
   const endCard = createEndCard(
@@ -137,6 +151,14 @@ export function createReelScene(
     buffaloVictorySheetTexture,
     winGlowTexture,
     ticker,
+    (stopPitch, reelIndex) => {
+      audio.playReelStop(stopPitch);
+
+      const tensionRate =
+        REEL_SPIN_TENSION_RATES[reelIndex] ??
+        REEL_SPIN_TENSION_RATES[REEL_SPIN_TENSION_RATES.length - 1];
+      audio.setReelSpinRate(tensionRate);
+    },
   );
   reel.view.position.set(0, REEL_Y);
 
@@ -175,8 +197,29 @@ export function createReelScene(
     }
   });
   const controls = new Container();
-  controls.position.set(0, SPIN_BUTTON_Y);
   controls.addChild(spinButton, spinGuide.view);
+
+  scene.layoutForOrientation = (isPortrait: boolean): void => {
+    if (isPortrait) {
+      logo.scale.set(LOGO_WIDTH / logoTexture.width);
+      logo.position.set(0, LOGO_Y);
+      featureHeader.position.set(0, FEATURE_HEADER_Y);
+      reel.view.position.set(0, REEL_Y);
+      controls.position.set(0, SPIN_BUTTON_Y);
+      return;
+    }
+
+    logo.scale.set(LANDSCAPE_LOGO_WIDTH / logoTexture.width);
+    logo.position.set(LANDSCAPE_BRAND_X, LANDSCAPE_LOGO_Y);
+    featureHeader.position.set(
+      LANDSCAPE_MACHINE_X,
+      LANDSCAPE_FEATURE_HEADER_Y,
+    );
+    reel.view.position.set(LANDSCAPE_MACHINE_X, LANDSCAPE_REEL_Y);
+    controls.position.set(LANDSCAPE_BRAND_X, LANDSCAPE_SPIN_BUTTON_Y);
+  };
+
+  scene.layoutForOrientation(window.innerHeight >= window.innerWidth);
 
   gameplay.addChild(logo, featureHeader, reel.view, controls);
   scene.addChild(gameplay, endCard.view);
@@ -189,6 +232,7 @@ function createReelGrid(
   buffaloVictorySheetTexture: Texture,
   winGlowTexture: Texture,
   ticker: Ticker,
+  onReelStop: (playbackRate: number, reelIndex: number) => void,
 ): {
   view: Container;
   spin: () => Promise<boolean>;
@@ -287,10 +331,21 @@ function createReelGrid(
 
     const outcomeIndex = Math.min(spinIndex, outcomeLayouts.length - 1);
     const targetLayout = outcomeLayouts[outcomeIndex];
+    const hasWinningFinalReel = outcomeIndex === outcomeLayouts.length - 1;
 
     await Promise.all(
       reels.map((reel, index) =>
-        spinReel(reel, index, symbols, targetLayout[index], ticker),
+        spinReel(
+          reel,
+          index,
+          symbols,
+          targetLayout[index],
+          ticker,
+          () => onReelStop(
+            getReelStopPitch(index, hasWinningFinalReel),
+            index,
+          ),
+        ),
       ),
     );
 
@@ -719,6 +774,7 @@ async function spinReel(
   symbols: readonly PlayableSymbol[],
   targetSymbols: readonly PlayableSymbol[],
   ticker: Ticker,
+  onStop: () => void,
 ): Promise<void> {
   setBufferSymbolsVisible(reel, true);
   setBufferSymbolsAlpha(reel, 0);
@@ -755,6 +811,7 @@ async function spinReel(
   advanceReel(reel, totalDistance - previousDistance, getNextSymbol);
   reel.offset = 0;
   layoutReelSymbols(reel);
+  onStop();
 
   await animateWithTicker(ticker, LANDING_BOUNCE_MS, (_, progress) => {
     reel.view.position.y =
@@ -770,6 +827,19 @@ async function spinReel(
   reel.view.position.y = 0;
   setBufferSymbolsVisible(reel, false);
   setBufferSymbolsAlpha(reel, 0);
+}
+
+function getReelStopPitch(
+  reelIndex: number,
+  hasWinningFinalReel: boolean,
+): number {
+  if (reelIndex === REEL_COLUMNS - 1) {
+    return hasWinningFinalReel
+      ? WINNING_FINAL_REEL_PITCH
+      : REEL_STOP_PITCHES[0];
+  }
+
+  return REEL_STOP_PITCHES[reelIndex] ?? REEL_STOP_PITCHES[0];
 }
 
 function createSpinProfile(
