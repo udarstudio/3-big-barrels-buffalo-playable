@@ -1,5 +1,6 @@
 import bisonCallUrl from '../assets/runtime/audio/bison-call-temp.m4a?url';
 import backgroundMusicUrl from '../assets/runtime/audio/dusty-jackpot-spin.m4a?url';
+import bigWinBellUrl from '../assets/runtime/audio/big-win-bell.m4a?url';
 import buttonClickUrl from '../assets/runtime/audio/button-click.m4a?url';
 import jackpotCoinRainUrl from '../assets/runtime/audio/jackpot-coin-rain.m4a?url';
 import reelSpinUrl from '../assets/runtime/audio/reel-spin-loop.m4a?url';
@@ -13,6 +14,7 @@ const EFFECT_URLS = [
   reelStopUrl,
   wolfHowlUrl,
   bisonCallUrl,
+  bigWinBellUrl,
   jackpotCoinRainUrl,
 ] as const;
 
@@ -46,6 +48,7 @@ export interface PlayableAudio {
   playReelStop: (playbackRate: number) => void;
   playWolfWin: () => void;
   playBuffaloWin: () => void;
+  playBigWinBell: () => void;
   playCoinRain: () => void;
   setCoinRainVolume: (volume: number) => void;
   stopCoinRain: () => void;
@@ -59,6 +62,7 @@ export function createPlayableAudio(): PlayableAudio {
   const reelStop = createManagedSound(effects, reelStopUrl, 0.5);
   const wolfHowl = createManagedSound(effects, wolfHowlUrl, 0.75);
   const bisonCall = createManagedSound(effects, bisonCallUrl, 0.85);
+  const bigWinBell = createManagedSound(effects, bigWinBellUrl, 1);
   const coinRain = createManagedSound(
     effects,
     jackpotCoinRainUrl,
@@ -76,6 +80,7 @@ export function createPlayableAudio(): PlayableAudio {
       reelSpin.stop();
       reelStop.stop();
       stopAnimalSounds();
+      bigWinBell.stop();
       coinRain.stop();
     }
   });
@@ -104,6 +109,7 @@ export function createPlayableAudio(): PlayableAudio {
       stopAnimalSounds();
       bisonCall.play();
     },
+    playBigWinBell: bigWinBell.play,
     playCoinRain: () => {
       coinRain.setVolume(COIN_RAIN_VOLUME);
       coinRain.play();

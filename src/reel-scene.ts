@@ -183,6 +183,7 @@ export function createReelScene(
         isComplete = await reel.spin();
 
         if (isComplete) {
+          audio.playBigWinBell();
           audio.playBuffaloWin();
           void endCard.show(gameplay);
         } else {
