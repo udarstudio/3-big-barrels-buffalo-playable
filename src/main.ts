@@ -1,4 +1,6 @@
 import { Application } from 'pixi.js';
+import { runWhenMraidReady } from './ad-environment';
+import { showPlayableFallback } from './playable-fallback';
 import { createReelScene, type ReelScene } from './reel-scene';
 import { loadPlayableTextures } from './symbols';
 import './styles.css';
@@ -25,6 +27,12 @@ async function bootstrap(): Promise<void> {
     backgroundAlpha: 0,
     preference: 'webgl',
   });
+
+  app.canvas.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault();
+    app.ticker.stop();
+    showPlayableFallback(host, 'The WebGL context was lost.');
+  }, { once: true });
 
   await document.fonts.load('800 44px "Roboto Slab"');
 
@@ -73,4 +81,15 @@ function layoutScene(scene: ReelScene, width: number, height: number): void {
   scene.layoutForOrientation(isPortrait);
 }
 
-void bootstrap();
+runWhenMraidReady(() => {
+  void bootstrap().catch((error) => {
+    const host = document.querySelector<HTMLElement>('#app');
+
+    if (host) {
+      showPlayableFallback(host, error);
+      return;
+    }
+
+    console.error('The playable could not start.', error);
+  });
+});

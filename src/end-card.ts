@@ -1,4 +1,5 @@
 import { Container, Graphics, Sprite, Texture, Ticker } from 'pixi.js';
+import { openClickThrough } from './ad-environment';
 import { createGuideHand } from './guide-hand';
 import { createMachineButton } from './machine-button';
 
@@ -304,26 +305,6 @@ function createFallingCoin(): Graphics {
     .fill({ color: 0xffc928 })
     .ellipse(-3, -3, 3, 1.5)
     .fill({ color: 0xffffbd });
-}
-
-function openClickThrough(): void {
-  const playableWindow = window as Window & {
-    clickTag?: string;
-    mraid?: { open: (url: string) => void };
-  };
-  const destination = playableWindow.clickTag;
-
-  window.dispatchEvent(new CustomEvent('playable:cta'));
-
-  if (!destination) {
-    return;
-  }
-
-  if (playableWindow.mraid) {
-    playableWindow.mraid.open(destination);
-  } else {
-    window.open(destination, '_blank', 'noopener');
-  }
 }
 
 function animateWithTicker(
