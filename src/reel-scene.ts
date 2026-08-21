@@ -140,6 +140,7 @@ export function createReelScene(
     coinFillLandscapeTexture,
     ticker,
     {
+      playButtonClick: audio.playButtonClick,
       playCoinRain: audio.playCoinRain,
       setCoinRainVolume: audio.setCoinRainVolume,
       stopCoinRain: audio.stopCoinRain,
@@ -171,31 +172,34 @@ export function createReelScene(
   featureHeader.position.set(0, FEATURE_HEADER_Y);
 
   const spinGuide = createGuideHand(glovePointerTexture, ticker);
-  const spinButton = createSpinButton(async () => {
-    spinGuide.dismiss();
-    audio.startMusic();
-    audio.playReelSpin();
-    let isComplete = false;
+  const spinButton = createSpinButton(
+    async () => {
+      spinGuide.dismiss();
+      audio.startMusic();
+      audio.playReelSpin();
+      let isComplete = false;
 
-    try {
-      isComplete = await reel.spin();
+      try {
+        isComplete = await reel.spin();
 
-      if (isComplete) {
-        audio.playBuffaloWin();
-        void endCard.show(gameplay);
-      } else {
-        audio.playWolfWin();
+        if (isComplete) {
+          audio.playBuffaloWin();
+          void endCard.show(gameplay);
+        } else {
+          audio.playWolfWin();
+        }
+
+        return isComplete;
+      } finally {
+        audio.stopReelSpin();
+
+        if (!isComplete) {
+          spinGuide.scheduleReappearance();
+        }
       }
-
-      return isComplete;
-    } finally {
-      audio.stopReelSpin();
-
-      if (!isComplete) {
-        spinGuide.scheduleReappearance();
-      }
-    }
-  });
+    },
+    audio.playButtonClick,
+  );
   const controls = new Container();
   controls.addChild(spinButton, spinGuide.view);
 
@@ -447,8 +451,11 @@ function drawFramePin(pins: Graphics, x: number, y: number): void {
     .fill({ color: 0xffed8a });
 }
 
-function createSpinButton(onSpin: () => Promise<boolean>): Container {
-  const button = createMachineButton('SPIN');
+function createSpinButton(
+  onSpin: () => Promise<boolean>,
+  playButtonClick: () => void,
+): Container {
+  const button = createMachineButton('SPIN', 44, playButtonClick);
   let isSpinning = false;
   let isPermanentlyDisabled = false;
 

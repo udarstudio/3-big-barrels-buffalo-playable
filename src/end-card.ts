@@ -40,6 +40,7 @@ export function createEndCard(
   coinFillLandscapeTexture: Texture,
   ticker: Ticker,
   audio: {
+    playButtonClick: () => void;
     playCoinRain: () => void;
     setCoinRainVolume: (volume: number) => void;
     stopCoinRain: () => void;
@@ -54,7 +55,7 @@ export function createEndCard(
   const coinPile = new Sprite(Texture.EMPTY);
   const finalUi = new Container();
   const logo = new Sprite(logoTexture);
-  const playNow = createMachineButton('PLAY NOW', 38);
+  const playNow = createMachineButton('PLAY NOW', 38, audio.playButtonClick);
   const playNowGuide = createGuideHand(glovePointerTexture, ticker);
   let hasStarted = false;
   let rainElapsed = 0;

@@ -1,12 +1,44 @@
-import bisonCallUrl from '../assets/runtime/audio/bison-call-temp.ogg?url';
+import bisonCallUrl from '../assets/runtime/audio/bison-call-temp.m4a?url';
 import backgroundMusicUrl from '../assets/runtime/audio/dusty-jackpot-spin.m4a?url';
-import jackpotCoinRainUrl from '../assets/runtime/audio/jackpot-coin-rain.mp3?url';
-import reelSpinUrl from '../assets/runtime/audio/reel-spin-loop.mp3?url';
-import reelStopUrl from '../assets/runtime/audio/reel-stop-accent.mp3?url';
-import wolfHowlUrl from '../assets/runtime/audio/wolf-howl-realistic.mp3?url';
+import buttonClickUrl from '../assets/runtime/audio/button-click.m4a?url';
+import jackpotCoinRainUrl from '../assets/runtime/audio/jackpot-coin-rain.m4a?url';
+import reelSpinUrl from '../assets/runtime/audio/reel-spin-loop.m4a?url';
+import reelStopUrl from '../assets/runtime/audio/reel-stop-accent.m4a?url';
+import wolfHowlUrl from '../assets/runtime/audio/wolf-howl-realistic.m4a?url';
+
+const COIN_RAIN_VOLUME = 0.65;
+const EFFECT_URLS = [
+  buttonClickUrl,
+  reelSpinUrl,
+  reelStopUrl,
+  wolfHowlUrl,
+  bisonCallUrl,
+  jackpotCoinRainUrl,
+] as const;
+
+interface ActiveSound {
+  gain: GainNode;
+  source: AudioBufferSourceNode;
+}
+
+interface EffectPlayer {
+  play: (
+    url: string,
+    options: { loop?: boolean; playbackRate?: number; volume: number },
+  ) => Promise<ActiveSound | undefined>;
+  unlock: () => void;
+}
+
+interface ManagedSound {
+  play: (playbackRate?: number) => void;
+  setPlaybackRate: (playbackRate: number) => void;
+  setVolume: (volume: number) => void;
+  stop: () => void;
+}
 
 export interface PlayableAudio {
   startMusic: () => void;
+  playButtonClick: () => void;
   playReelSpin: () => void;
   setReelSpinRate: (playbackRate: number) => void;
   stopReelSpin: () => void;
@@ -18,66 +50,227 @@ export interface PlayableAudio {
   stopCoinRain: () => void;
 }
 
-const COIN_RAIN_VOLUME = 0.65;
-
 export function createPlayableAudio(): PlayableAudio {
   const backgroundMusic = createAudio(backgroundMusicUrl, 0.4);
-  const reelSpin = createAudio(reelSpinUrl, 0.4);
-  reelSpin.loop = true;
-  reelSpin.preservesPitch = false;
-  const reelStop = createAudio(reelStopUrl, 0.5);
-  reelStop.preservesPitch = false;
-  const wolfHowl = createAudio(wolfHowlUrl, 0.75);
-  const bisonCall = createAudio(bisonCallUrl, 0.85);
-  const coinRain = createAudio(jackpotCoinRainUrl, COIN_RAIN_VOLUME);
+  const effects = createEffectPlayer();
+  const reelSpin = createManagedSound(effects, reelSpinUrl, 0.4, true);
+  const reelStop = createManagedSound(effects, reelStopUrl, 0.5);
+  const wolfHowl = createManagedSound(effects, wolfHowlUrl, 0.75);
+  const bisonCall = createManagedSound(effects, bisonCallUrl, 0.85);
+  const coinRain = createManagedSound(
+    effects,
+    jackpotCoinRainUrl,
+    COIN_RAIN_VOLUME,
+  );
 
   const stopAnimalSounds = (): void => {
-    stop(wolfHowl);
-    stop(bisonCall);
+    wolfHowl.stop();
+    bisonCall.stop();
   };
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       stop(backgroundMusic);
-      stop(reelSpin);
-      stop(reelStop);
+      reelSpin.stop();
+      reelStop.stop();
       stopAnimalSounds();
-      stop(coinRain);
+      coinRain.stop();
     }
   });
 
   return {
-    startMusic: () => playIfPaused(backgroundMusic),
+    startMusic: () => {
+      effects.unlock();
+      playIfPaused(backgroundMusic);
+    },
+    playButtonClick: () => {
+      effects.unlock();
+      void effects.play(buttonClickUrl, { volume: 0.65 });
+    },
     playReelSpin: () => {
       stopAnimalSounds();
-      reelSpin.playbackRate = 1;
-      play(reelSpin);
+      reelSpin.play(1);
     },
-    setReelSpinRate: (playbackRate) => {
-      reelSpin.playbackRate = playbackRate;
-    },
-    stopReelSpin: () => stop(reelSpin),
-    playReelStop: (playbackRate) => {
-      reelStop.playbackRate = playbackRate;
-      play(reelStop);
-    },
+    setReelSpinRate: reelSpin.setPlaybackRate,
+    stopReelSpin: reelSpin.stop,
+    playReelStop: reelStop.play,
     playWolfWin: () => {
       stopAnimalSounds();
-      play(wolfHowl);
+      wolfHowl.play();
     },
     playBuffaloWin: () => {
       stopAnimalSounds();
-      play(bisonCall);
+      bisonCall.play();
     },
     playCoinRain: () => {
-      coinRain.volume = COIN_RAIN_VOLUME;
-      play(coinRain);
+      coinRain.setVolume(COIN_RAIN_VOLUME);
+      coinRain.play();
     },
     setCoinRainVolume: (volume) => {
-      coinRain.volume = COIN_RAIN_VOLUME * Math.min(Math.max(volume, 0), 1);
+      coinRain.setVolume(
+        COIN_RAIN_VOLUME * Math.min(Math.max(volume, 0), 1),
+      );
     },
-    stopCoinRain: () => stop(coinRain),
+    stopCoinRain: coinRain.stop,
   };
+}
+
+function createEffectPlayer(): EffectPlayer {
+  const audioWindow = window as unknown as {
+    AudioContext?: typeof AudioContext;
+    webkitAudioContext?: typeof AudioContext;
+  };
+  const AudioContextConstructor =
+    audioWindow.AudioContext ?? audioWindow.webkitAudioContext;
+
+  if (!AudioContextConstructor) {
+    return {
+      play: async () => undefined,
+      unlock: () => undefined,
+    };
+  }
+
+  const context = new AudioContextConstructor({ latencyHint: 'interactive' });
+  const buffers = new Map<string, Promise<AudioBuffer>>();
+  let hasUnlocked = false;
+
+  const loadBuffer = (url: string): Promise<AudioBuffer> => {
+    const existing = buffers.get(url);
+
+    if (existing) {
+      return existing;
+    }
+
+    const loading = fetch(url)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Audio request failed with ${response.status}.`);
+        }
+
+        return response.arrayBuffer();
+      })
+      .then((encodedAudio) => context.decodeAudioData(encodedAudio));
+
+    buffers.set(url, loading);
+    void loading.catch(() => undefined);
+    return loading;
+  };
+
+  EFFECT_URLS.forEach((url) => loadBuffer(url));
+
+  return {
+    play: async (url, { loop = false, playbackRate = 1, volume }) => {
+      const resume = context.state === 'suspended'
+        ? context.resume()
+        : Promise.resolve();
+
+      try {
+        const [buffer] = await Promise.all([loadBuffer(url), resume]);
+        const source = context.createBufferSource();
+        const gain = context.createGain();
+
+        source.buffer = buffer;
+        source.loop = loop;
+        source.playbackRate.value = playbackRate;
+        gain.gain.value = volume;
+        source.connect(gain).connect(context.destination);
+        source.addEventListener('ended', () => {
+          source.disconnect();
+          gain.disconnect();
+        }, { once: true });
+        source.start();
+        return { gain, source };
+      } catch (error) {
+        console.warn('A playable sound effect could not start.', error);
+        return undefined;
+      }
+    },
+    unlock: () => {
+      if (hasUnlocked && context.state === 'running') {
+        return;
+      }
+
+      hasUnlocked = true;
+      void context.resume().catch(() => undefined);
+
+      // iOS requires a source to start synchronously inside the tap handler.
+      const unlockSource = context.createBufferSource();
+      unlockSource.buffer = context.createBuffer(1, 1, context.sampleRate);
+      unlockSource.connect(context.destination);
+      unlockSource.addEventListener('ended', () => unlockSource.disconnect(), {
+        once: true,
+      });
+      unlockSource.start(0);
+    },
+  };
+}
+
+function createManagedSound(
+  player: EffectPlayer,
+  url: string,
+  initialVolume: number,
+  loop = false,
+): ManagedSound {
+  let active: ActiveSound | undefined;
+  let generation = 0;
+  let playbackRate = 1;
+  let volume = initialVolume;
+
+  const stopActive = (): void => {
+    if (!active) {
+      return;
+    }
+
+    stopActiveSound(active);
+    active = undefined;
+  };
+
+  return {
+    play: (nextPlaybackRate = playbackRate) => {
+      playbackRate = nextPlaybackRate;
+      const currentGeneration = ++generation;
+      stopActive();
+
+      void player.play(url, { loop, playbackRate, volume }).then((sound) => {
+        if (!sound) {
+          return;
+        }
+
+        if (generation !== currentGeneration) {
+          stopActiveSound(sound);
+          return;
+        }
+
+        active = sound;
+      });
+    },
+    setPlaybackRate: (nextPlaybackRate) => {
+      playbackRate = nextPlaybackRate;
+
+      if (active) {
+        active.source.playbackRate.value = playbackRate;
+      }
+    },
+    setVolume: (nextVolume) => {
+      volume = nextVolume;
+
+      if (active) {
+        active.gain.gain.value = volume;
+      }
+    },
+    stop: () => {
+      generation += 1;
+      stopActive();
+    },
+  };
+}
+
+function stopActiveSound(sound: ActiveSound): void {
+  try {
+    sound.source.stop();
+  } catch {
+    // The source may already have ended naturally.
+  }
 }
 
 function playIfPaused(audio: HTMLAudioElement): void {
@@ -86,7 +279,7 @@ function playIfPaused(audio: HTMLAudioElement): void {
   }
 
   void audio.play().catch(() => {
-    // Some preview environments block sound until the first user gesture.
+    // Preview environments can block music until the first user gesture.
   });
 }
 
@@ -94,14 +287,8 @@ function createAudio(url: string, volume: number): HTMLAudioElement {
   const audio = new Audio(url);
   audio.preload = 'auto';
   audio.volume = volume;
+  audio.load();
   return audio;
-}
-
-function play(audio: HTMLAudioElement): void {
-  audio.currentTime = 0;
-  void audio.play().catch(() => {
-    // Some preview environments block sound until the first user gesture.
-  });
 }
 
 function stop(audio: HTMLAudioElement): void {
