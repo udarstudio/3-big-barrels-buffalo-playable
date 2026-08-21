@@ -26,6 +26,7 @@ interface EffectPlayer {
     url: string,
     options: { loop?: boolean; playbackRate?: number; volume: number },
   ) => Promise<ActiveSound | undefined>;
+  routeMediaElement: (audio: HTMLMediaElement) => void;
   unlock: () => void;
 }
 
@@ -51,8 +52,9 @@ export interface PlayableAudio {
 }
 
 export function createPlayableAudio(): PlayableAudio {
-  const backgroundMusic = createAudio(backgroundMusicUrl, 0.4);
   const effects = createEffectPlayer();
+  const backgroundMusic = createAudio(backgroundMusicUrl, 0.4);
+  effects.routeMediaElement(backgroundMusic);
   const reelSpin = createManagedSound(effects, reelSpinUrl, 0.4, true);
   const reelStop = createManagedSound(effects, reelStopUrl, 0.5);
   const wolfHowl = createManagedSound(effects, wolfHowlUrl, 0.75);
@@ -126,6 +128,7 @@ function createEffectPlayer(): EffectPlayer {
   if (!AudioContextConstructor) {
     return {
       play: async () => undefined,
+      routeMediaElement: () => undefined,
       unlock: () => undefined,
     };
   }
@@ -184,6 +187,10 @@ function createEffectPlayer(): EffectPlayer {
         console.warn('A playable sound effect could not start.', error);
         return undefined;
       }
+    },
+    routeMediaElement: (audio) => {
+      const source = context.createMediaElementSource(audio);
+      source.connect(context.destination);
     },
     unlock: () => {
       if (hasUnlocked && context.state === 'running') {

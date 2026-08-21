@@ -9,6 +9,7 @@ const COIN_SOUND_DELAY_MS = 900;
 const COIN_SOUND_DURATION_MS = 3500;
 const COIN_SOUND_FADE_MS = 500;
 const END_CARD_REVEAL_MS = 700;
+const PLAY_NOW_Y = 100;
 const COIN_COUNT = 100;
 const COIN_INITIAL_TRAIL = 560;
 const MAX_SHAKE_DISTANCE = 8;
@@ -57,6 +58,7 @@ export function createEndCard(
   const logo = new Sprite(logoTexture);
   const playNow = createMachineButton('PLAY NOW', 38, audio.playButtonClick);
   const playNowGuide = createGuideHand(glovePointerTexture, ticker);
+  const playNowGroup = new Container();
   let hasStarted = false;
   let rainElapsed = 0;
 
@@ -77,7 +79,8 @@ export function createEndCard(
 
   playNowGuide.view.visible = false;
 
-  finalUi.addChild(logo, playNow.view, playNowGuide.view);
+  playNowGroup.addChild(playNow.view, playNowGuide.view);
+  finalUi.addChild(logo, playNowGroup);
   effects.addChild(rain.view, coinPile);
   view.addChild(effects, finalUi);
 
@@ -140,7 +143,7 @@ export function createEndCard(
     coinPile.scale.set(pileScale);
     coinPile.position.set(0, pileStartY);
     logo.position.set(0, layout.logoY);
-    playNow.view.position.set(0, 0);
+    playNowGroup.position.set(0, PLAY_NOW_Y);
     rain.configure(layout.visibleWidth, layout.halfHeight);
     rainElapsed = 0;
     view.visible = true;

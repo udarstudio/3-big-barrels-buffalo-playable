@@ -66,7 +66,6 @@ export function createMachineButton(
       fontSize,
       fontWeight: '800',
       letterSpacing: 2,
-      stroke: { color: 0xb9a77c, width: 2 },
     },
   });
   label.anchor.set(0.5);
